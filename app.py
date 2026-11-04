@@ -3,6 +3,8 @@ import gradio as gr
 import requests
 import inspect
 import pandas as pd
+from smolagents import CodeAgent,ToolCallingAgent, DuckDuckGoSearchTool, VisitWebpageTool, OpenAIServerModel
+from helpers import read_file,read_webpage,web_search
 
 # (Keep Constants as is)
 # --- Constants ---
@@ -11,13 +13,19 @@ DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 # --- Basic Agent Definition ---
 # ----- THIS IS WERE YOU CAN BUILD WHAT YOU WANT ------
 class BasicAgent:
-    def __init__(self):
-        print("BasicAgent initialized.")
-    def __call__(self, question: str) -> str:
-        print(f"Agent received question (first 50 chars): {question[:50]}...")
-        fixed_answer = "This is a default answer."
-        print(f"Agent returning fixed answer: {fixed_answer}")
-        return fixed_answer
+       def __init__(self):
+           model = OpenAIServerModel(
+               model_id="openai/gpt-oss-120b",
+               api_base="https://api.groq.com/openai/v1",
+               api_key=os.environ["GROQ_API_KEY"],
+           )
+           self.agent = ToolCallingAgent(
+               tools=[web_search, read_webpage,read_file],
+               model=model,
+               max_steps=3,
+           )
+       def __call__(self, question: str) -> str:
+           return str(self.agent.run(question))
 
 def run_and_submit_all( profile: gr.OAuthProfile | None):
     """

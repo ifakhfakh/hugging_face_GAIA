@@ -1,2 +1,6 @@
+smolagents
+ddgs
+markdownify
+gradio[oauth]
 gradio
 requests
