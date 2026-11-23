@@ -3,7 +3,7 @@ import requests
 from app import BasicAgent, DEFAULT_API_URL
 from helpers import answer_item, load_cache
 
-N = 2
+N = 5
 
 questions = requests.get(f"{DEFAULT_API_URL}/questions", timeout=15).json()
 sample = random.sample(questions, min(N, len(questions)))   # 10 different questions

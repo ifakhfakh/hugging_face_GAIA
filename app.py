@@ -3,8 +3,8 @@ import gradio as gr
 import requests
 import inspect
 import pandas as pd
-from smolagents import CodeAgent,ToolCallingAgent, DuckDuckGoSearchTool, VisitWebpageTool, OpenAIServerModel
-from helpers import read_file,read_webpage,web_search
+from smolagents import CodeAgent,ToolCallingAgent, DuckDuckGoSearchTool,InferenceClientModel, VisitWebpageTool, OpenAIServerModel
+from helpers import prune_old_observations, read_file,read_webpage,web_search,RetryingModel
 
 # (Keep Constants as is)
 # --- Constants ---
@@ -14,16 +14,24 @@ DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 # ----- THIS IS WERE YOU CAN BUILD WHAT YOU WANT ------
 class BasicAgent:
        def __init__(self):
-           model = OpenAIServerModel(
-               model_id="openai/gpt-oss-120b",
+           model = RetryingModel( #OpenAIServerModel
+               model_id="qwen/qwen3.8-27b",
                api_base="https://api.groq.com/openai/v1",
                api_key=os.environ["GROQ_API_KEY"],
            )
-           self.agent = ToolCallingAgent(
+           self.agent = CodeAgent(
                tools=[web_search, read_webpage,read_file],
                model=model,
-               max_steps=3,
+               additional_authorized_imports=["requests", "pandas", "json", "datetime", "math", "csv", "re"],
+               max_print_outputs_length=3000,
+               step_callbacks=[prune_old_observations],
+               max_steps=8,
            )
+        # self.agent = CodeAgent(
+        #     tools=[web_search, read_webpage,read_file],
+        #     model=InferenceClientModel(model_id="openai/gpt-oss-120b"),
+        #     max_steps=3,
+        # )
        def __call__(self, question: str) -> str:
            return str(self.agent.run(question))
 

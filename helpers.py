@@ -16,12 +16,14 @@ ANSWER_RULES = (
     "final_answer immediately and do not search again just to double-check. If the page says it continues, "
     "read the next part with read_webpage(start=...) before searching elsewhere. "
     "Never repeat a search that gave no new information. "
+    "Never print whole pages or large tables. Extract only the relevant part with code (for example a regex or a pandas filter) and print just that. Write down key findings in your Thought so you don't need to re-read old outputs. "
+    "Every reply you give must be a call to one of the available tools (web_search, read_webpage, read_file, final_answer). Never reply with plain text. "
 )
 
 import re
 from markdownify import markdownify
 
-CHUNK = 6000   # characters per call (about 1,500 tokens)
+CHUNK = 3000   # characters per call (about 1,500 tokens)
 
 from ddgs import DDGS
 
@@ -128,13 +130,15 @@ def download_file(api_url: str, task_id: str, file_name: str):
     return path
 
 
-def build_prompt(item: dict, api_url: str) -> str:
+def build_prompt(item: dict, api_url: str):
+    """Returns (prompt, file_missing)."""
     prompt = item["question"]
-    path = download_file(api_url, item["task_id"], item.get("file_name", ""))
-    if path:
+    if item.get("file_name"):
+        path = download_file(api_url, item["task_id"], item["file_name"])
+        if path is None:
+            return None, True
         prompt += f"\n\nAn attached file is available at: {path}. Use the read_file tool to read it."
-    return prompt + ANSWER_RULES
-
+    return prompt + ANSWER_RULES, False
 
 def ask_with_retry(agent, prompt: str, retries: int = 3, wait: int = 30) -> str:
     for attempt in range(retries):
@@ -153,8 +157,39 @@ def answer_item(agent, item: dict, api_url: str, cache: dict) -> str:
     if task_id in cache:
         print("(using cached answer)")
         return cache[task_id]
-    answer = ask_with_retry(agent, build_prompt(item, api_url))
+    prompt, file_missing = build_prompt(item, api_url)
+    if file_missing:
+        print("SKIPPED: the attached file is not available on the server")
+        return "unknown"
+    answer = ask_with_retry(agent, prompt)
     cache[task_id] = answer
     save_cache(cache)
     time.sleep(SLEEP_BETWEEN)
     return answer
+
+TPM_LIMIT = 8000   # your Groq tokens-per-minute limit
+
+from smolagents import OpenAIServerModel
+
+class RetryingModel(OpenAIServerModel):
+    """Pauses after every model call, in proportion to the tokens it used."""
+    def generate(self, *args, **kwargs):
+        msg = super().generate(*args, **kwargs)
+        usage = getattr(msg, "token_usage", None)
+        if usage:
+            used = (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
+            pause = min(used / TPM_LIMIT * 60, 45)
+            print(f"[pacing] {used} tokens used, pausing {pause:.0f}s")
+            time.sleep(pause)
+        return msg
+
+from smolagents import ActionStep
+
+def prune_old_observations(memory_step, agent=None, **kwargs):
+    """After each step, shorten the observations of steps older than the previous one."""
+    if agent is None:
+        return
+    for step in agent.memory.steps:
+        if isinstance(step, ActionStep) and step.step_number < memory_step.step_number - 1:
+            if step.observations and len(step.observations) > 400:
+                step.observations = step.observations[:400] + "\n...[older output truncated]"
